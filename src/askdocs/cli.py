@@ -39,8 +39,9 @@ def cmd_indexar(cfg: Config) -> None:
 
     paginas = carregar_documentos(cfg.pasta_base)
     chunks = dividir_em_chunks(paginas, cfg.tamanho_chunk, cfg.sobreposicao_chunk)
-    print(f"{len(paginas)} paginas divididas em {len(chunks)} chunks. Gerando embeddings...")
-    indexar(chunks, cfg)
+    print(f"{len(paginas)} paginas divididas em {len(chunks)} chunks.")
+    indexar(chunks, cfg, lambda feitos, total: print(f"\rEmbeddings: {feitos}/{total}", end="", flush=True))
+    print()
 
     print(f"Base pronta em {cfg.pasta_db} ({time.perf_counter() - inicio:.0f}s).")
 
