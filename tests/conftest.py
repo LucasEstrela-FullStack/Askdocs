@@ -10,12 +10,12 @@ from askdocs.config import Config
 
 
 def criar_pdf(caminho: Path, paginas: list[str], senha: str | None = None) -> None:
-    """Cria um PDF com uma linha de texto por página (texto vazio = página em branco)."""
+    """Cria um PDF com um texto por página ("\\n" quebra linha; vazio = página em branco)."""
     caminho.parent.mkdir(parents=True, exist_ok=True)
     canvas = Canvas(str(caminho))
     for texto in paginas:
-        if texto:
-            canvas.drawString(72, 720, texto)
+        for i, linha in enumerate(texto.splitlines()):
+            canvas.drawString(72, 720 - 16 * i, linha)
         canvas.showPage()
     canvas.save()
 

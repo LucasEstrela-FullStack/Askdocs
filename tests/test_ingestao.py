@@ -3,6 +3,7 @@ import logging
 import pytest
 from conftest import criar_pdf, doc
 
+from askdocs import ingestao
 from askdocs.erros import ErroAskDocs
 from askdocs.ingestao import carregar_documentos, dividir_em_chunks
 
@@ -44,6 +45,64 @@ def test_pula_arquivo_que_nao_e_pdf_de_verdade(tmp_path):
     (tmp_path / "quebrado.pdf").write_text("nao sou um pdf")
     criar_pdf(tmp_path / "bom.pdf", ["Ok"])
     assert [d.metadata["fonte"] for d in carregar_documentos(tmp_path)] == ["bom.pdf"]
+
+
+def test_falha_inesperada_do_pypdf_pula_so_aquele_arquivo(tmp_path, monkeypatch, caplog):
+    criar_pdf(tmp_path / "estranho.pdf", ["X"])
+    criar_pdf(tmp_path / "bom.pdf", ["Ok"])
+    leitor_real = ingestao.PdfReader
+
+    def leitor(caminho):
+        if caminho.name == "estranho.pdf":
+            raise KeyError("/Root")  # o que o pypdf solta em alguns PDFs malformados
+        return leitor_real(caminho)
+
+    monkeypatch.setattr(ingestao, "PdfReader", leitor)
+    with caplog.at_level(logging.WARNING):
+        docs = carregar_documentos(tmp_path)
+
+    assert [d.metadata["fonte"] for d in docs] == ["bom.pdf"]
+    assert "estranho.pdf" in caplog.text
+
+
+TEMAS = ["ferias", "beneficios", "reembolso", "seguranca"]
+
+
+def pagina(numero: int, *meio: str) -> str:
+    tema = TEMAS[numero - 1]
+    partes = ["Regras", "Prazo", "Limite", "Contato", "Excecoes", "Exemplos", "Duvidas", "Historico"]
+    corpo = [f"{parte} de {tema}" for parte in partes]
+    return "\n".join(["ACME LTDA", *corpo[:4], *meio, *corpo[4:], f"Pagina {numero}"])
+
+
+def test_remove_cabecalho_e_rodape_repetidos(tmp_path):
+    criar_pdf(tmp_path / "a.pdf", [pagina(n) for n in range(1, 5)])
+    primeira = carregar_documentos(tmp_path)[0].page_content.splitlines()
+    assert primeira[0] == "Regras de ferias"
+    assert primeira[-1] == "Historico de ferias"
+    assert len(primeira) == 8
+
+
+def test_linha_repetida_no_meio_da_pagina_e_conteudo(tmp_path):
+    criar_pdf(tmp_path / "a.pdf", [pagina(n, "Aviso importante", "Item 7") for n in range(1, 5)])
+    primeira = carregar_documentos(tmp_path)[0].page_content
+    assert "Aviso importante\nItem 7" in primeira
+    assert "ACME LTDA" not in primeira
+
+
+def test_linha_em_metade_das_paginas_ou_menos_fica(tmp_path):
+    criar_pdf(tmp_path / "a.pdf", ["Aviso\nUm", "Aviso\nDois", "Tres", "Quatro"])
+    assert carregar_documentos(tmp_path)[0].page_content == "Aviso\nUm"
+
+
+def test_com_poucas_paginas_nada_e_tratado_como_cabecalho(tmp_path):
+    criar_pdf(tmp_path / "a.pdf", ["ACME\nUm", "ACME\nDois"])
+    assert [d.page_content for d in carregar_documentos(tmp_path)] == ["ACME\nUm", "ACME\nDois"]
+
+
+def test_remove_pontilhado_de_sumario_e_mantem_reticencias(tmp_path):
+    criar_pdf(tmp_path / "a.pdf", ["1. Ferias . . . . . . . 3\nE depois... nada"])
+    assert carregar_documentos(tmp_path)[0].page_content == "1. Ferias 3\nE depois... nada"
 
 
 def test_erro_quando_a_pasta_nao_existe(tmp_path):

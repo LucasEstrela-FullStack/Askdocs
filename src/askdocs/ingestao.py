@@ -1,17 +1,26 @@
 """Ingestão: transforma os PDFs da pasta base em documentos do LangChain."""
 
 import logging
+import re
+from collections import Counter
 from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
-from pypdf.errors import PyPdfError
 
 from askdocs.erros import ErroAskDocs
 from askdocs.texto import sem_controle
 
 log = logging.getLogger(__name__)
+
+# Com menos páginas, uma linha repetida pode ser conteúdo, não cabeçalho.
+MIN_PAGINAS_CABECALHO = 3
+LINHAS_DA_BORDA = 4
+
+_NUMEROS = re.compile(r"\d+")
+# Pontilhado de sumário ("Férias . . . . . 3"): só ruído para a busca.
+_PONTILHADO = re.compile(r"(?:[ \t]*\.){4,}[ \t]*")
 
 
 def carregar_documentos(pasta: Path) -> list[Document]:
@@ -33,8 +42,11 @@ def carregar_documentos(pasta: Path) -> list[Document]:
         fonte = sem_controle(arquivo.relative_to(pasta).as_posix())
         try:
             paginas = _ler_paginas(arquivo, fonte)
-        except (PyPdfError, OSError) as erro:
-            # O pypdf lê sob demanda: senha ou arquivo corrompido podem aparecer em qualquer página.
+        except Exception as erro:
+            # O pypdf lê sob demanda, então senha ou arquivo corrompido podem
+            # estourar em qualquer página. Em PDF malformado ele também solta
+            # KeyError, ValueError e afins, não só PyPdfError. Um arquivo ruim
+            # não pode derrubar a indexação dos outros.
             log.warning("Ignorando %s: não foi possível ler o PDF (%s)", fonte, sem_controle(str(erro)))
             continue
 
@@ -48,14 +60,55 @@ def carregar_documentos(pasta: Path) -> list[Document]:
 
 
 def _ler_paginas(arquivo: Path, fonte: str) -> list[Document]:
+    textos = [sem_controle(pagina.extract_text() or "") for pagina in PdfReader(arquivo).pages]
+    repetidas = _linhas_repetidas(textos)
+
     documentos = []
-    for numero, pagina in enumerate(PdfReader(arquivo).pages, start=1):
-        texto = sem_controle(pagina.extract_text() or "").strip()
+    for numero, texto in enumerate(textos, start=1):
+        texto = _limpar_pagina(texto, repetidas)
         if texto:
             documentos.append(
                 Document(page_content=texto, metadata={"fonte": fonte, "pagina": numero})
             )
     return documentos
+
+
+def _chave_da_linha(linha: str) -> str:
+    # "Página 3" e "Página 4" são a mesma linha de rodapé.
+    return _NUMEROS.sub("#", linha.strip())
+
+
+def _indices_da_borda(linhas: list[str]) -> set[int]:
+    """Posições das primeiras e últimas linhas com texto, onde ficam cabeçalho e rodapé."""
+    com_texto = [i for i, linha in enumerate(linhas) if linha.strip()]
+    return set(com_texto[:LINHAS_DA_BORDA] + com_texto[-LINHAS_DA_BORDA:])
+
+
+def _linhas_repetidas(textos: list[str]) -> set[str]:
+    """Linhas da borda presentes em mais da metade das páginas: cabeçalho e rodapé.
+
+    Elas não dizem nada sobre o conteúdo e, como entram em todo trecho, deixam
+    os embeddings de páginas diferentes parecidos entre si. Só a borda conta,
+    para que um conteúdo que muda só nos números ("Item 1", "Item 2") não pareça
+    rodapé.
+    """
+    if len(textos) < MIN_PAGINAS_CABECALHO:
+        return set()
+    contagem = Counter()
+    for texto in textos:
+        linhas = texto.splitlines()
+        contagem.update({_chave_da_linha(linhas[i]) for i in _indices_da_borda(linhas)})
+    return {chave for chave, vezes in contagem.items() if vezes > len(textos) / 2}
+
+
+def _limpar_pagina(texto: str, repetidas: set[str]) -> str:
+    linhas = texto.splitlines()
+    borda = _indices_da_borda(linhas)
+    mantidas = (
+        linha for i, linha in enumerate(linhas)
+        if i not in borda or _chave_da_linha(linha) not in repetidas
+    )
+    return _PONTILHADO.sub(" ", "\n".join(mantidas)).strip()
 
 
 def dividir_em_chunks(documentos: list[Document], tamanho: int, sobreposicao: int) -> list[Document]:
