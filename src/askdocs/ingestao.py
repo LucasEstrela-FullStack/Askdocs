@@ -41,7 +41,7 @@ def carregar_documentos(pasta: Path) -> list[Document]:
     for arquivo in arquivos:
         fonte = sem_controle(arquivo.relative_to(pasta).as_posix())
         try:
-            paginas = _ler_paginas(arquivo, fonte)
+            textos = _extrair_textos(arquivo)
         except Exception as erro:
             # O pypdf lê sob demanda, então senha ou arquivo corrompido podem
             # estourar em qualquer página. Em PDF malformado ele também solta
@@ -50,6 +50,7 @@ def carregar_documentos(pasta: Path) -> list[Document]:
             log.warning("Ignorando %s: não foi possível ler o PDF (%s)", fonte, sem_controle(str(erro)))
             continue
 
+        paginas = _montar_paginas(textos, fonte)
         if not paginas:
             log.warning("%s não tem texto para extrair (PDF escaneado precisa de OCR)", fonte)
         documentos.extend(paginas)
@@ -59,8 +60,13 @@ def carregar_documentos(pasta: Path) -> list[Document]:
     return documentos
 
 
-def _ler_paginas(arquivo: Path, fonte: str) -> list[Document]:
-    textos = [sem_controle(pagina.extract_text() or "") for pagina in PdfReader(arquivo).pages]
+def _extrair_textos(arquivo: Path) -> list[str]:
+    """Só a parte que depende do pypdf, para o ``except`` amplo não cobrir mais nada."""
+    return [pagina.extract_text() or "" for pagina in PdfReader(arquivo).pages]
+
+
+def _montar_paginas(textos: list[str], fonte: str) -> list[Document]:
+    textos = [sem_controle(texto) for texto in textos]
     repetidas = _linhas_repetidas(textos)
 
     documentos = []
@@ -92,13 +98,15 @@ def _linhas_repetidas(textos: list[str]) -> set[str]:
     para que um conteúdo que muda só nos números ("Item 1", "Item 2") não pareça
     rodapé.
     """
-    if len(textos) < MIN_PAGINAS_CABECALHO:
+    # Página em branco não tem cabeçalho para mostrar, então não entra na conta.
+    com_texto = [texto for texto in textos if texto.strip()]
+    if len(com_texto) < MIN_PAGINAS_CABECALHO:
         return set()
     contagem = Counter()
-    for texto in textos:
+    for texto in com_texto:
         linhas = texto.splitlines()
         contagem.update({_chave_da_linha(linhas[i]) for i in _indices_da_borda(linhas)})
-    return {chave for chave, vezes in contagem.items() if vezes > len(textos) / 2}
+    return {chave for chave, vezes in contagem.items() if vezes > len(com_texto) / 2}
 
 
 def _limpar_pagina(texto: str, repetidas: set[str]) -> str:

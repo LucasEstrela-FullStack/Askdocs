@@ -75,12 +75,29 @@ def pagina(numero: int, *meio: str) -> str:
     return "\n".join(["ACME LTDA", *corpo[:4], *meio, *corpo[4:], f"Pagina {numero}"])
 
 
+def test_erro_na_nossa_limpeza_nao_e_confundido_com_pdf_ruim(tmp_path, monkeypatch):
+    criar_pdf(tmp_path / "bom.pdf", ["Ok"])
+
+    def limpeza_com_bug(textos, fonte):
+        raise ValueError("bug no AskDocs")
+
+    monkeypatch.setattr(ingestao, "_montar_paginas", limpeza_com_bug)
+    with pytest.raises(ValueError, match="bug no AskDocs"):
+        carregar_documentos(tmp_path)
+
+
 def test_remove_cabecalho_e_rodape_repetidos(tmp_path):
     criar_pdf(tmp_path / "a.pdf", [pagina(n) for n in range(1, 5)])
     primeira = carregar_documentos(tmp_path)[0].page_content.splitlines()
     assert primeira[0] == "Regras de ferias"
     assert primeira[-1] == "Historico de ferias"
     assert len(primeira) == 8
+
+
+def test_paginas_em_branco_nao_atrapalham_a_deteccao(tmp_path):
+    paginas = [pagina(1), "", pagina(2), "", pagina(3), "", pagina(4), ""]
+    criar_pdf(tmp_path / "a.pdf", paginas)
+    assert all("ACME" not in d.page_content for d in carregar_documentos(tmp_path))
 
 
 def test_linha_repetida_no_meio_da_pagina_e_conteudo(tmp_path):
