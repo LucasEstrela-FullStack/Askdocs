@@ -22,7 +22,7 @@ def carregar_documentos(pasta: Path) -> list[Document]:
     if not pasta.is_dir():
         raise ErroAskDocs(f"Pasta de documentos nao encontrada: {pasta}")
 
-    arquivos = sorted(pasta.rglob("*.pdf"))
+    arquivos = sorted(pasta.rglob("*.pdf", case_sensitive=False))
     if not arquivos:
         raise ErroAskDocs(f"Nenhum PDF encontrado em {pasta}")
 
@@ -30,22 +30,29 @@ def carregar_documentos(pasta: Path) -> list[Document]:
     for arquivo in arquivos:
         fonte = arquivo.relative_to(pasta).as_posix()
         try:
-            paginas = PdfReader(arquivo).pages
+            paginas = _ler_paginas(arquivo, fonte)
         except (PyPdfError, OSError) as erro:
+            # O pypdf le sob demanda: senha e corrupcao podem aparecer em qualquer pagina.
             log.warning("Ignorando %s: nao foi possivel ler o PDF (%s)", fonte, erro)
             continue
 
-        antes = len(documentos)
-        for numero, pagina in enumerate(paginas, start=1):
-            texto = (pagina.extract_text() or "").strip()
-            if texto:
-                documentos.append(
-                    Document(page_content=texto, metadata={"fonte": fonte, "pagina": numero})
-                )
-
-        if len(documentos) == antes:
+        if not paginas:
             log.warning("%s nao tem texto extraivel (PDF escaneado precisa de OCR)", fonte)
+        documentos.extend(paginas)
 
+    if not documentos:
+        raise ErroAskDocs(f"Nenhum PDF com texto extraivel em {pasta}")
+    return documentos
+
+
+def _ler_paginas(arquivo: Path, fonte: str) -> list[Document]:
+    documentos = []
+    for numero, pagina in enumerate(PdfReader(arquivo).pages, start=1):
+        texto = (pagina.extract_text() or "").strip()
+        if texto:
+            documentos.append(
+                Document(page_content=texto, metadata={"fonte": fonte, "pagina": numero})
+            )
     return documentos
 
 
