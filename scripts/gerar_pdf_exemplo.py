@@ -86,7 +86,7 @@ ESTILOS = {
 
 
 class Manual(BaseDocTemplate):
-    """Documento com capa, sumario automatico e marcadores por secao."""
+    """Documento com capa, sumário automático e marcadores por seção."""
 
     def __init__(self, caminho: Path) -> None:
         super().__init__(
@@ -94,8 +94,8 @@ class Manual(BaseDocTemplate):
             leftMargin=MARGEM, rightMargin=MARGEM,
             topMargin=MARGEM + 6 * mm, bottomMargin=MARGEM,
             title="Manual do Colaborador - Nebula Labs",
-            author="Nebula Labs (empresa ficticia)",
-            subject="Documento ficticio para testes do AskDocs",
+            author="Nebula Labs (empresa fictícia)",
+            subject="Documento fictício para testes do AskDocs",
         )
         quadro = Frame(MARGEM, MARGEM, LARGURA_UTIL, ALTURA - 2 * MARGEM - 6 * mm, id="quadro")
         self.addPageTemplates([
@@ -173,7 +173,7 @@ def lista(*itens: str) -> list[Paragraph]:
     return [Paragraph(item, ESTILOS["item"], bulletText="•") for item in itens]
 
 
-def destaque(texto: str) -> Table:
+def destaque(texto: str) -> KeepTogether:
     caixa = Table([[Paragraph(texto, ESTILOS["destaque"])]], colWidths=[LARGURA_UTIL])
     caixa.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), TEAL_CLARO),
@@ -186,7 +186,7 @@ def destaque(texto: str) -> Table:
     return KeepTogether([Spacer(1, 4), caixa, Spacer(1, 8)])
 
 
-def tabela(cabecalho: list[str], linhas: list[list[str]], larguras: list[float]) -> Table:
+def tabela(cabecalho: list[str], linhas: list[list[str]], larguras: list[float]) -> KeepTogether:
     dados = [[Paragraph(c, ESTILOS["cabecalho"]) for c in cabecalho]]
     dados += [[Paragraph(c, ESTILOS["celula"]) for c in linha] for linha in linhas]
     t = Table(dados, colWidths=[LARGURA_UTIL * f for f in larguras], repeatRows=1, hAlign="LEFT")
