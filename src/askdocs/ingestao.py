@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
@@ -46,3 +47,16 @@ def carregar_documentos(pasta: Path) -> list[Document]:
             log.warning("%s nao tem texto extraivel (PDF escaneado precisa de OCR)", fonte)
 
     return documentos
+
+
+def dividir_em_chunks(documentos: list[Document], tamanho: int, sobreposicao: int) -> list[Document]:
+    """Quebra as paginas em trechos menores, preferindo cortar em paragrafos e frases.
+
+    A sobreposicao repete o fim de um trecho no inicio do proximo, para que uma
+    regra cortada ao meio continue inteira em pelo menos um deles. O inicio de
+    cada trecho na pagina fica em ``start_index``.
+    """
+    divisor = RecursiveCharacterTextSplitter(
+        chunk_size=tamanho, chunk_overlap=sobreposicao, add_start_index=True,
+    )
+    return divisor.split_documents(documentos)
