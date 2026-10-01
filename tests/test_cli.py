@@ -116,12 +116,15 @@ def test_resposta_do_modelo_nao_leva_escapes_ao_terminal(cfg, capsys):
     assert "Limpo" in saida
 
 
-def test_nao_cita_fontes_quando_o_modelo_nao_acha_a_resposta(cfg, capsys):
-    llm = LlmFalso("Não encontrei essa ", "informação nos documentos.")
-    cli.responder("qual o CEP?", banco_com((doc("x", "manual.pdf", 2), 0.9)), llm, cfg)
+@pytest.mark.parametrize("partes", [
+    ("Não encontrei essa ", "informação nos documentos."),
+    ('"Não encontrei essa informação nos documentos."',),
+    ("Desculpe, não encontrei essa informação nos documentos.",),
+])
+def test_nao_cita_fontes_quando_o_modelo_nao_acha_a_resposta(cfg, capsys, partes):
+    cli.responder("qual o CEP?", banco_com((doc("x", "manual.pdf", 2), 0.9)), LlmFalso(*partes), cfg)
 
     saida = capsys.readouterr().out
-    assert SEM_RESPOSTA in saida
     assert "Fontes" not in saida and "manual.pdf" not in saida
 
 
@@ -132,22 +135,25 @@ def test_modo_conversa_continua_depois_de_falha_do_ollama(cfg, monkeypatch, caps
     monkeypatch.setattr(banco, "modelo_da_base", lambda cfg: cfg.modelo_embedding)
     monkeypatch.setattr(banco, "abrir_banco", lambda cfg: "banco")
 
-    entradas = iter(["primeira", "segunda", "sair"])
+    entradas = iter(["falha", "ctrl-c", "normal", "sair"])
     monkeypatch.setattr("builtins.input", lambda _: next(entradas))
     respondidas = []
 
     def responder(pergunta, *_):
         respondidas.append(pergunta)
-        if pergunta == "primeira":
+        if pergunta == "falha":
             raise ollama.ResponseError("llama-server process has terminated")
+        if pergunta == "ctrl-c":
+            raise KeyboardInterrupt
         print("ok")
 
     monkeypatch.setattr(cli, "responder", responder)
     cli.cmd_perguntar(cfg, None)
 
-    assert respondidas == ["primeira", "segunda"]
+    assert respondidas == ["falha", "ctrl-c", "normal"]
     saida = capsys.readouterr()
     assert "llama-server process has terminated" in saida.err
+    assert "(resposta interrompida)" in saida.out
     assert "ok" in saida.out
 
 

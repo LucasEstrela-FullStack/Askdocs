@@ -65,8 +65,9 @@ def responder(pergunta: str, banco: "Chroma", llm: "ChatOllama", cfg: Config) ->
     print()
 
     # O modelo leu os trechos e concluiu que a resposta não está neles: citar
-    # páginas aqui daria a entender o contrário.
-    if resposta.strip().startswith(SEM_RESPOSTA.rstrip(".")):
+    # páginas aqui daria a entender o contrário. Ele às vezes põe a frase entre
+    # aspas ou começa com "Desculpe,", então basta ela aparecer.
+    if SEM_RESPOSTA.rstrip(".").lower() in resposta.lower():
         return
 
     paginas_por_fonte: dict[str, set[int]] = {}
@@ -106,11 +107,13 @@ def cmd_perguntar(cfg: Config, pergunta: str | None) -> None:
             return
         if pergunta.lower() in SAIR:
             return
+        # Uma pergunta que falha ou é interrompida não encerra a conversa.
         try:
             responder(pergunta, banco, llm, cfg)
         except ollama.ResponseError as erro:
-            # Uma pergunta que falha não precisa encerrar a conversa.
             print(f"erro: {mensagem_de_falha_do_ollama(erro)}", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("\n(resposta interrompida)")
 
 
 def mensagem_de_falha_do_ollama(erro: "ollama.ResponseError") -> str:
