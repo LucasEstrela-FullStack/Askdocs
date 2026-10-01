@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Configuracao local
+.env
+
+# Documentos e banco vetorial ficam so na maquina
+base/*
+!base/.gitkeep
+db/
+
+# Ferramentas
+.pytest_cache/
+.ruff_cache/
