@@ -3,7 +3,7 @@ from conftest import doc
 from langchain_core.embeddings import DeterministicFakeEmbedding
 
 from askdocs import banco
-from askdocs.banco import abrir_banco, id_do_chunk, indexar
+from askdocs.banco import abrir_banco, id_do_chunk, indexar, total_de_chunks
 
 
 class EmbeddingQueFalha(DeterministicFakeEmbedding):
@@ -44,7 +44,7 @@ def test_indexa_e_encontra_o_trecho_identico(cfg, embeddings_falsos):
 def test_reindexar_substitui_em_vez_de_duplicar(cfg, embeddings_falsos):
     indexar(chunks(), cfg)
     indexar(chunks()[:1], cfg)
-    assert abrir_banco(cfg)._collection.count() == 1
+    assert total_de_chunks(abrir_banco(cfg)) == 1
 
 
 def test_informa_progresso(cfg, embeddings_falsos, monkeypatch):
@@ -62,4 +62,4 @@ def test_falha_do_ollama_preserva_a_base_anterior(cfg, embeddings_falsos, monkey
         indexar(chunks()[:1], cfg)
 
     monkeypatch.setattr(banco, "OllamaEmbeddings", lambda **_: DeterministicFakeEmbedding(size=32))
-    assert abrir_banco(cfg)._collection.count() == 3
+    assert total_de_chunks(abrir_banco(cfg)) == 3

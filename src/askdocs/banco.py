@@ -32,6 +32,10 @@ def abrir_banco(cfg: Config) -> Chroma:
     )
 
 
+def total_de_chunks(banco: Chroma) -> int:
+    return banco._collection.count()
+
+
 def id_do_chunk(chunk: Document) -> str:
     """ID estavel derivado da origem do trecho: o mesmo PDF gera os mesmos IDs."""
     m = chunk.metadata
