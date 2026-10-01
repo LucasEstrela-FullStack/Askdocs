@@ -1,75 +1,117 @@
-"""Banco vetorial: embeddings do Ollama persistidos no Chroma."""
+"""Banco vetorial: embeddings do Ollama guardados no Chroma."""
 
 import hashlib
 from collections.abc import Callable
+from typing import NamedTuple
 
+import chromadb
+from chromadb.api import ClientAPI
+from chromadb.api.models.Collection import Collection
 from chromadb.config import Settings
+from chromadb.utils.batch_utils import create_batches
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_ollama import OllamaEmbeddings
 
 from askdocs.config import Config
+from askdocs.modelos import criar_embeddings
 
-# Trechos por chamada ao Ollama: pequeno o bastante para mostrar progresso na CPU.
+# Trechos por chamada ao Ollama: pouco o bastante para mostrar progresso na CPU.
 LOTE_EMBEDDING = 32
 
+# Cosseno deixa a relevância entre 0 e 1, a mesma escala do limiar da config.
+DISTANCIA = {"hnsw": {"space": "cosine"}}
 
-def abrir_banco(cfg: Config) -> Chroma:
-    """Abre (ou cria) a colecao persistida em ``cfg.pasta_db``.
 
-    A distancia e cosseno, para que a relevancia fique entre 0 e 1 e o limiar
-    da configuracao tenha significado. A telemetria do Chroma fica desligada:
-    nada do AskDocs sai da maquina.
-    """
-    return Chroma(
-        collection_name=cfg.colecao,
-        embedding_function=OllamaEmbeddings(
-            model=cfg.modelo_embedding, base_url=cfg.ollama_url, num_gpu=cfg.ollama_num_gpu,
-        ),
-        persist_directory=str(cfg.pasta_db),
-        collection_configuration={"hnsw": {"space": "cosine"}},
-        client_settings=Settings(anonymized_telemetry=False),
+class ResumoIndexacao(NamedTuple):
+    novos: int
+    removidos: int
+    total: int
+
+
+def _cliente(cfg: Config) -> ClientAPI:
+    # Telemetria desligada: nada do AskDocs sai da máquina.
+    return chromadb.PersistentClient(
+        path=str(cfg.pasta_db), settings=Settings(anonymized_telemetry=False),
     )
 
 
-def total_de_chunks(banco: Chroma) -> int:
-    return banco._collection.count()
+def _colecao(cliente: ClientAPI, cfg: Config) -> Collection:
+    return cliente.get_or_create_collection(cfg.colecao, configuration=DISTANCIA)
+
+
+def abrir_banco(cfg: Config) -> Chroma:
+    return Chroma(
+        client=_cliente(cfg), collection_name=cfg.colecao,
+        embedding_function=criar_embeddings(cfg), collection_configuration=DISTANCIA,
+    )
+
+
+def total_de_chunks(cfg: Config) -> int:
+    return _colecao(_cliente(cfg), cfg).count()
+
+
+def modelo_da_base(cfg: Config) -> str | None:
+    """Modelo de embedding usado na última indexação (None se a base é antiga ou nova)."""
+    return (_colecao(_cliente(cfg), cfg).metadata or {}).get("modelo_embedding")
 
 
 def id_do_chunk(chunk: Document) -> str:
-    """ID estavel derivado da origem do trecho: o mesmo PDF gera os mesmos IDs."""
+    """Muda junto com o trecho: é assim que a reindexação sabe o que mudou."""
     m = chunk.metadata
-    origem = f"{m['fonte']}|{m['pagina']}|{m['start_index']}"
-    return hashlib.sha1(origem.encode()).hexdigest()
+    chave = f"{m['fonte']}|{m['pagina']}|{m['start_index']}|{chunk.page_content}"
+    return hashlib.sha1(chave.encode()).hexdigest()
 
 
 def indexar(
     chunks: list[Document], cfg: Config, progresso: Callable[[int, int], None] | None = None,
-) -> int:
-    """Recria a colecao do zero com os chunks e devolve quantos foram gravados.
+) -> ResumoIndexacao:
+    """Deixa a coleção igual a ``chunks``, gerando embedding só do que é novo.
 
-    Recriar (em vez de acrescentar) garante que PDFs removidos da pasta base
-    tambem saiam do banco. Os embeddings sao gerados antes de apagar a colecao
-    antiga: se o Ollama falhar no meio, a base anterior continua intacta.
+    O que já está no banco com o mesmo ID fica como está, e o que sumiu (PDF
+    removido ou editado) sai. Os embeddings são calculados antes de qualquer
+    escrita, então uma falha do Ollama não estraga a base. Trocar o modelo de
+    embedding refaz tudo: vetores de modelos diferentes não se comparam.
     """
-    banco = abrir_banco(cfg)
-    textos = [c.page_content for c in chunks]
+    cliente = _cliente(cfg)
+    colecao = _colecao(cliente, cfg)
+    reconstruir = (colecao.metadata or {}).get("modelo_embedding") != cfg.modelo_embedding
+    existentes = set() if reconstruir else set(colecao.get(include=[])["ids"])
 
+    por_id = {id_do_chunk(c): c for c in chunks}
+    pendentes = {i: c for i, c in por_id.items() if i not in existentes}
+    textos = [c.page_content for c in pendentes.values()]
+    vetores = _gerar_embeddings(textos, cfg, progresso)
+
+    if reconstruir:
+        cliente.delete_collection(cfg.colecao)
+        colecao = cliente.create_collection(
+            cfg.colecao, configuration=DISTANCIA,
+            metadata={"modelo_embedding": cfg.modelo_embedding},
+        )
+
+    if pendentes:
+        lotes = create_batches(
+            cliente, ids=list(pendentes), embeddings=vetores, documents=textos,
+            metadatas=[c.metadata for c in pendentes.values()],
+        )
+        for ids, embeddings, metadatas, documents in lotes:
+            colecao.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
+
+    obsoletos = sorted(existentes - por_id.keys())
+    lote = cliente.get_max_batch_size()
+    for inicio in range(0, len(obsoletos), lote):
+        colecao.delete(ids=obsoletos[inicio:inicio + lote])
+
+    return ResumoIndexacao(novos=len(pendentes), removidos=len(obsoletos), total=len(por_id))
+
+
+def _gerar_embeddings(
+    textos: list[str], cfg: Config, progresso: Callable[[int, int], None] | None,
+) -> list[list[float]]:
+    modelo = criar_embeddings(cfg)
     vetores: list[list[float]] = []
     for inicio in range(0, len(textos), LOTE_EMBEDDING):
-        vetores += banco.embeddings.embed_documents(textos[inicio:inicio + LOTE_EMBEDDING])
+        vetores += modelo.embed_documents(textos[inicio:inicio + LOTE_EMBEDDING])
         if progresso:
             progresso(len(vetores), len(textos))
-
-    banco.reset_collection()
-    colecao = banco._collection
-    lote = banco._client.get_max_batch_size()
-    for inicio in range(0, len(chunks), lote):
-        parte = chunks[inicio:inicio + lote]
-        colecao.upsert(
-            ids=[id_do_chunk(c) for c in parte],
-            embeddings=vetores[inicio:inicio + lote],
-            documents=[c.page_content for c in parte],
-            metadatas=[c.metadata for c in parte],
-        )
-    return len(chunks)
+    return vetores
