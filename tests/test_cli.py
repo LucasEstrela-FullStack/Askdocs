@@ -1,11 +1,12 @@
 from types import SimpleNamespace
 
+import ollama
 import pytest
 from conftest import doc
 from langchain_core.tracers.context import _tracing_v2_is_enabled
 from langsmith.utils import get_env_var
 
-from askdocs import cli, modelos
+from askdocs import banco, cli, modelos
 from askdocs.erros import ErroAskDocs
 from askdocs.prompt import SEM_RESPOSTA
 
@@ -113,6 +114,41 @@ def test_resposta_do_modelo_nao_leva_escapes_ao_terminal(cfg, capsys):
     saida = capsys.readouterr().out
     assert "\x1b" not in saida and "\x07" not in saida
     assert "Limpo" in saida
+
+
+def test_nao_cita_fontes_quando_o_modelo_nao_acha_a_resposta(cfg, capsys):
+    llm = LlmFalso("Não encontrei essa ", "informação nos documentos.")
+    cli.responder("qual o CEP?", banco_com((doc("x", "manual.pdf", 2), 0.9)), llm, cfg)
+
+    saida = capsys.readouterr().out
+    assert SEM_RESPOSTA in saida
+    assert "Fontes" not in saida and "manual.pdf" not in saida
+
+
+def test_modo_conversa_continua_depois_de_falha_do_ollama(cfg, monkeypatch, capsys):
+    monkeypatch.setattr(modelos, "verificar_ollama", lambda *a: None)
+    monkeypatch.setattr(modelos, "criar_llm", lambda cfg: "llm")
+    monkeypatch.setattr(banco, "total_de_chunks", lambda cfg: 3)
+    monkeypatch.setattr(banco, "modelo_da_base", lambda cfg: cfg.modelo_embedding)
+    monkeypatch.setattr(banco, "abrir_banco", lambda cfg: "banco")
+
+    entradas = iter(["primeira", "segunda", "sair"])
+    monkeypatch.setattr("builtins.input", lambda _: next(entradas))
+    respondidas = []
+
+    def responder(pergunta, *_):
+        respondidas.append(pergunta)
+        if pergunta == "primeira":
+            raise ollama.ResponseError("llama-server process has terminated")
+        print("ok")
+
+    monkeypatch.setattr(cli, "responder", responder)
+    cli.cmd_perguntar(cfg, None)
+
+    assert respondidas == ["primeira", "segunda"]
+    saida = capsys.readouterr()
+    assert "llama-server process has terminated" in saida.err
+    assert "ok" in saida.out
 
 
 def test_main_mostra_erro_amigavel_sem_traceback(monkeypatch, capsys):

@@ -18,6 +18,7 @@ from askdocs.erros import ErroAskDocs
 from askdocs.texto import sem_controle
 
 if TYPE_CHECKING:
+    import ollama
     from langchain_chroma import Chroma
     from langchain_ollama import ChatOllama
 
@@ -56,9 +57,17 @@ def responder(pergunta: str, banco: "Chroma", llm: "ChatOllama", cfg: Config) ->
         print(SEM_RESPOSTA)
         return
 
+    resposta = ""
     for parte in llm.stream(montar_mensagens(pergunta, trechos)):
-        print(sem_controle(parte.content), end="", flush=True)
+        texto = sem_controle(parte.content)
+        resposta += texto
+        print(texto, end="", flush=True)
     print()
+
+    # O modelo leu os trechos e concluiu que a resposta não está neles: citar
+    # páginas aqui daria a entender o contrário.
+    if resposta.strip().startswith(SEM_RESPOSTA.rstrip(".")):
+        return
 
     paginas_por_fonte: dict[str, set[int]] = {}
     for doc in trechos:
@@ -69,6 +78,8 @@ def responder(pergunta: str, banco: "Chroma", llm: "ChatOllama", cfg: Config) ->
 
 
 def cmd_perguntar(cfg: Config, pergunta: str | None) -> None:
+    import ollama
+
     from askdocs.banco import abrir_banco, modelo_da_base, total_de_chunks
     from askdocs.modelos import criar_llm, verificar_ollama
 
@@ -95,7 +106,18 @@ def cmd_perguntar(cfg: Config, pergunta: str | None) -> None:
             return
         if pergunta.lower() in SAIR:
             return
-        responder(pergunta, banco, llm, cfg)
+        try:
+            responder(pergunta, banco, llm, cfg)
+        except ollama.ResponseError as erro:
+            # Uma pergunta que falha não precisa encerrar a conversa.
+            print(f"erro: {mensagem_de_falha_do_ollama(erro)}", file=sys.stderr)
+
+
+def mensagem_de_falha_do_ollama(erro: "ollama.ResponseError") -> str:
+    return (
+        f"o Ollama falhou ao rodar o modelo: {erro.error}\n"
+        "Se a GPU for antiga, tente ASKDOCS_OLLAMA_NUM_GPU=0 no .env."
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -115,7 +137,10 @@ def _sair_com_erro(mensagem: str) -> None:
 
 
 def main() -> None:
+    # Avisos e erros vão para o stderr e também citam nomes de arquivo; redirecionado
+    # para arquivo no Windows, ele ficaria em cp1252 e quebraria com outros alfabetos.
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     logging.basicConfig(level=logging.WARNING, format="aviso: %(message)s")
     args = _parser().parse_args()
 
@@ -137,9 +162,6 @@ def main() -> None:
     except ErroAskDocs as erro:
         _sair_com_erro(str(erro))
     except ollama.ResponseError as erro:
-        _sair_com_erro(
-            f"o Ollama falhou ao rodar o modelo: {erro.error}\n"
-            "Se a GPU for antiga, tente ASKDOCS_OLLAMA_NUM_GPU=0 no .env."
-        )
+        _sair_com_erro(mensagem_de_falha_do_ollama(erro))
     except KeyboardInterrupt:
         sys.exit(130)
