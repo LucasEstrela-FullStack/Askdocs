@@ -81,6 +81,37 @@ def test_responde_e_agrupa_fontes_por_arquivo(cfg, capsys):
     assert "anexo.pdf (p. 1)" in saida
 
 
+def test_resposta_e_fonte_nao_levam_sequencias_de_escape_ao_terminal(cfg, capsys):
+    class LlmMalicioso:
+        def stream(self, mensagens):
+            yield SimpleNamespace(content="\x1b]0;titulo falso\x07\x1b[2JLimpo\n")
+
+    banco = banco_com((doc("x", "\x1b[31mvermelho.pdf"), 0.9))
+    cli.responder("?", banco, LlmMalicioso(), cfg)
+
+    saida = capsys.readouterr().out
+    assert "\x1b" not in saida and "\x07" not in saida
+    assert "Limpo\n" in saida
+
+
+@pytest.mark.parametrize("variavel", ["LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"])
+def test_desliga_rastreamento_do_langsmith(cfg, monkeypatch, caplog, variavel):
+    monkeypatch.setenv(variavel, "true")
+    cli.garantir_execucao_local(cfg)
+    assert cli.os.environ[variavel] == "false"
+    assert "LangSmith" in caplog.text
+
+
+def test_avisa_quando_o_ollama_e_remoto(cfg, caplog):
+    cli.garantir_execucao_local(cfg.model_copy(update={"ollama_url": "http://10.0.0.5:11434"}))
+    assert "vao sair desta maquina" in caplog.text
+
+
+def test_ollama_local_nao_gera_aviso(cfg, caplog):
+    cli.garantir_execucao_local(cfg)
+    assert caplog.text == ""
+
+
 def test_main_mostra_erro_amigavel_sem_traceback(monkeypatch, capsys):
     def falha(cfg, pergunta):
         raise ErroAskDocs("base vazia")

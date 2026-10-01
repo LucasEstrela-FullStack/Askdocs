@@ -4,7 +4,6 @@ import runpy
 from pathlib import Path
 
 import pytest
-from langchain_ollama import ChatOllama
 
 from askdocs import cli
 from askdocs.banco import abrir_banco
@@ -26,10 +25,7 @@ def ambiente(tmp_path_factory):
     # Le o .env do projeto (ex.: ASKDOCS_OLLAMA_NUM_GPU=0), mas usa pastas temporarias.
     cfg = Config(pasta_base=pasta / "base", pasta_db=pasta / "db")
     cli.cmd_indexar(cfg)
-    llm = ChatOllama(
-        model=cfg.modelo_chat, base_url=cfg.ollama_url, temperature=0, num_gpu=cfg.ollama_num_gpu,
-    )
-    return cfg, abrir_banco(cfg), llm
+    return cfg, abrir_banco(cfg), cli.criar_llm(cfg.model_copy(update={"temperatura": 0}))
 
 
 @pytest.mark.parametrize("pergunta, esperado", [

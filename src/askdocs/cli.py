@@ -2,15 +2,18 @@
 
 import argparse
 import logging
+import os
+import re
 import sys
 import time
+from urllib.parse import urlparse
 
 import ollama
 from langchain_chroma import Chroma
 from langchain_ollama import ChatOllama
 from pydantic import ValidationError
 
-from askdocs.banco import abrir_banco, indexar
+from askdocs.banco import abrir_banco, indexar, total_de_chunks
 from askdocs.config import Config, carregar_config
 from askdocs.consulta import buscar
 from askdocs.erros import ErroAskDocs
@@ -18,6 +21,40 @@ from askdocs.ingestao import carregar_documentos, dividir_em_chunks
 from askdocs.prompt import SEM_RESPOSTA, montar_mensagens
 
 SAIR = {"", "sair", "exit", "quit"}
+
+# Caracteres de controle (inclusive ESC, que inicia sequencias ANSI). Texto vindo
+# do PDF, ou repetido pelo modelo, nao pode mexer no terminal de quem le.
+_CONTROLE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+# Com qualquer uma ligada, o LangChain envia perguntas e trechos para o LangSmith.
+_RASTREAMENTO = ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING")
+
+_HOSTS_LOCAIS = {"localhost", "127.0.0.1", "::1"}
+
+log = logging.getLogger(__name__)
+
+
+def seguro(texto: str) -> str:
+    return _CONTROLE.sub("", texto)
+
+
+def garantir_execucao_local(cfg: Config) -> None:
+    """Desliga o envio de rastros ao LangSmith e avisa se o Ollama for remoto."""
+    for variavel in _RASTREAMENTO:
+        if os.environ.get(variavel, "").lower() == "true":
+            os.environ[variavel] = "false"
+            log.warning("%s desligada: o AskDocs nao envia dados para o LangSmith", variavel)
+
+    host = urlparse(cfg.ollama_url).hostname
+    if host not in _HOSTS_LOCAIS:
+        log.warning("Ollama em %s: perguntas e trechos dos PDFs vao sair desta maquina", host)
+
+
+def criar_llm(cfg: Config) -> ChatOllama:
+    return ChatOllama(
+        model=cfg.modelo_chat, base_url=cfg.ollama_url,
+        temperature=cfg.temperatura, num_gpu=cfg.ollama_num_gpu,
+    )
 
 
 def verificar_ollama(cfg: Config, *modelos: str) -> None:
@@ -53,7 +90,7 @@ def responder(pergunta: str, banco: Chroma, llm: ChatOllama, cfg: Config) -> Non
         return
 
     for parte in llm.stream(montar_mensagens(pergunta, [doc for doc, _ in trechos])):
-        print(parte.content, end="", flush=True)
+        print(seguro(parte.content), end="", flush=True)
     print()
 
     paginas_por_fonte: dict[str, set[int]] = {}
@@ -61,19 +98,16 @@ def responder(pergunta: str, banco: Chroma, llm: ChatOllama, cfg: Config) -> Non
         paginas_por_fonte.setdefault(doc.metadata["fonte"], set()).add(doc.metadata["pagina"])
     print("\nFontes:")
     for fonte, paginas in paginas_por_fonte.items():
-        print(f"  - {fonte} (p. {', '.join(map(str, sorted(paginas)))})")
+        print(f"  - {seguro(fonte)} (p. {', '.join(map(str, sorted(paginas)))})")
 
 
 def cmd_perguntar(cfg: Config, pergunta: str | None) -> None:
     verificar_ollama(cfg, cfg.modelo_embedding, cfg.modelo_chat)
     banco = abrir_banco(cfg)
-    if banco._collection.count() == 0:
+    if total_de_chunks(banco) == 0:
         raise ErroAskDocs("A base esta vazia. Rode primeiro: askdocs indexar")
 
-    llm = ChatOllama(
-        model=cfg.modelo_chat, base_url=cfg.ollama_url,
-        temperature=cfg.temperatura, num_gpu=cfg.ollama_num_gpu,
-    )
+    llm = criar_llm(cfg)
 
     if pergunta:
         responder(pergunta, banco, llm, cfg)
@@ -106,6 +140,7 @@ def main() -> None:
 
     try:
         cfg = carregar_config()
+        garantir_execucao_local(cfg)
         if args.comando == "indexar":
             cmd_indexar(cfg)
         else:
