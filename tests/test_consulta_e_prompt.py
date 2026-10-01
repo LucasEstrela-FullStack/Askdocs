@@ -38,3 +38,14 @@ def test_mensagens_trazem_regras_contexto_e_pergunta():
 
 def test_sem_controle_remove_escapes_e_mantem_quebras():
     assert sem_controle("\x1b]0;titulo\x07\x1b[2Jlinha 1\nlinha\t2\x00") == "]0;titulo[2Jlinha 1\nlinha\t2"
+
+
+def test_sem_controle_remove_invisiveis_e_marcas_de_direcao():
+    # "relatório‮fdp.exe" aparece na tela como "relatórioexe.pdf"
+    assert sem_controle("relatório‮fdp.exe") == "relatóriofdp.exe"
+    assert sem_controle("infor­mação​ com﻿ BOM") == "informação com BOM"
+
+
+def test_sem_controle_preserva_acentos_e_emoji():
+    texto = "Férias, ação, São Paulo — 👨‍👩‍👧 ✓"
+    assert sem_controle(texto) == texto
