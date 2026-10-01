@@ -29,7 +29,9 @@ class Config(BaseSettings):
     sobreposicao_chunk: int = Field(200, ge=0)
 
     k: int = Field(4, gt=0)
-    limiar_relevancia: float = Field(0.5, ge=0, le=1)
+    # Calibrado com bge-m3: perguntas cobertas pela base ficam acima de 0.5 e
+    # perguntas fora dela ficam perto de 0.25.
+    limiar_relevancia: float = Field(0.4, ge=0, le=1)
 
     @model_validator(mode="after")
     def _validar_sobreposicao(self) -> "Config":
