@@ -12,6 +12,7 @@ class Config(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="ASKDOCS_", env_file=".env", env_file_encoding="utf-8", extra="ignore",
+        env_parse_none_str="",  # ASKDOCS_OLLAMA_NUM_GPU= vazio volta ao padrao do Ollama
     )
 
     pasta_base: Path = Path("base")
