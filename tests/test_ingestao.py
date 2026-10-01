@@ -47,7 +47,7 @@ def test_pula_arquivo_que_nao_e_pdf_de_verdade(tmp_path):
 
 
 def test_erro_quando_a_pasta_nao_existe(tmp_path):
-    with pytest.raises(ErroAskDocs, match="nao encontrada"):
+    with pytest.raises(ErroAskDocs, match="não encontrada"):
         carregar_documentos(tmp_path / "nada")
 
 
@@ -59,7 +59,7 @@ def test_erro_quando_nao_ha_pdf(tmp_path):
 
 def test_erro_quando_nenhum_pdf_tem_texto(tmp_path):
     criar_pdf(tmp_path / "escaneado.pdf", ["", ""])
-    with pytest.raises(ErroAskDocs, match="texto extraivel"):
+    with pytest.raises(ErroAskDocs, match="texto para extrair"):
         carregar_documentos(tmp_path)
 
 
