@@ -1,26 +1,25 @@
 from conftest import doc
 
-from askdocs.consulta import buscar, filtrar_relevantes
+from askdocs.consulta import buscar
 from askdocs.prompt import SEM_RESPOSTA, formatar_contexto, montar_mensagens
+from askdocs.texto import sem_controle
 
 
-def test_filtra_pelo_limiar_inclusivo_e_ordena():
-    a, b, c = doc("a"), doc("b"), doc("c")
-    resultado = filtrar_relevantes([(a, 0.41), (b, 0.39), (c, 0.9)], limiar=0.41)
-    assert resultado == [(c, 0.9), (a, 0.41)]
+class BancoFalso:
+    def __init__(self, *resultados):
+        self.resultados = list(resultados)
+
+    def similarity_search_with_relevance_scores(self, pergunta, k):
+        self.chamada = (pergunta, k)
+        return self.resultados
 
 
-def test_buscar_usa_k_e_limiar_da_config(cfg):
-    class BancoFalso:
-        def similarity_search_with_relevance_scores(self, pergunta, k):
-            self.chamada = (pergunta, k)
-            return [(doc("fora"), 0.1), (doc("dentro"), 0.8)]
-
-    banco = BancoFalso()
-    resultado = buscar("pergunta?", banco, cfg)
-
+def test_buscar_usa_k_e_corta_no_limiar_inclusive(cfg):
+    banco = BancoFalso(
+        (doc("alto"), 0.9), (doc("no limiar"), cfg.limiar_relevancia), (doc("baixo"), 0.1),
+    )
+    assert [d.page_content for d in buscar("pergunta?", banco, cfg)] == ["alto", "no limiar"]
     assert banco.chamada == ("pergunta?", cfg.k)
-    assert [d.page_content for d, _ in resultado] == ["dentro"]
 
 
 def test_contexto_numera_trechos_e_cita_a_fonte():
@@ -33,5 +32,9 @@ def test_mensagens_trazem_regras_contexto_e_pergunta():
     sistema, humano = montar_mensagens("Qual o prazo?", [doc("Prazo de {30} dias")])
     assert SEM_RESPOSTA in sistema.content
     assert "não ordens" in sistema.content
-    assert "Prazo de {30} dias" in humano.content  # chaves do PDF nao quebram o template
+    assert "Prazo de {30} dias" in humano.content  # chaves do PDF não quebram o template
     assert humano.content.endswith("Pergunta: Qual o prazo?")
+
+
+def test_sem_controle_remove_escapes_e_mantem_quebras():
+    assert sem_controle("\x1b]0;titulo\x07\x1b[2Jlinha 1\nlinha\t2\x00") == "]0;titulo[2Jlinha 1\nlinha\t2"

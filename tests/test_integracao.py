@@ -8,6 +8,7 @@ import pytest
 from askdocs import cli
 from askdocs.banco import abrir_banco
 from askdocs.config import Config
+from askdocs.modelos import criar_llm, execucao_local
 from askdocs.prompt import SEM_RESPOSTA
 
 pytestmark = pytest.mark.integracao
@@ -22,10 +23,11 @@ def ambiente(tmp_path_factory):
         mp.setattr("sys.argv", ["gerar", str(pasta / "base" / "manual.pdf")])
         runpy.run_path(str(SCRIPT_PDF), run_name="__main__")
 
-    # Le o .env do projeto (ex.: ASKDOCS_OLLAMA_NUM_GPU=0), mas usa pastas temporarias.
+    # Lê o .env do projeto (ex.: ASKDOCS_OLLAMA_NUM_GPU=0), mas usa pastas temporárias.
     cfg = Config(pasta_base=pasta / "base", pasta_db=pasta / "db")
-    cli.cmd_indexar(cfg)
-    return cfg, abrir_banco(cfg), cli.criar_llm(cfg.model_copy(update={"temperatura": 0}))
+    with execucao_local(cfg):
+        cli.cmd_indexar(cfg)
+        yield cfg, abrir_banco(cfg), criar_llm(cfg.model_copy(update={"temperatura": 0}))
 
 
 @pytest.mark.parametrize("pergunta, esperado", [

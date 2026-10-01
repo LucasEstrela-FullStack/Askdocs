@@ -2,56 +2,81 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import doc
+from langchain_core.tracers.context import _tracing_v2_is_enabled
+from langsmith.utils import get_env_var
 
-from askdocs import cli
+from askdocs import cli, modelos
 from askdocs.erros import ErroAskDocs
 from askdocs.prompt import SEM_RESPOSTA
 
 
-def ollama_com(*modelos):
+def ollama_com(*modelos_instalados, erro=None):
     class Cliente:
         def __init__(self, host):
             pass
 
         def list(self):
-            return SimpleNamespace(models=[SimpleNamespace(model=m) for m in modelos])
+            if erro:
+                raise erro
+            return SimpleNamespace(models=[SimpleNamespace(model=m) for m in modelos_instalados])
 
     return Cliente
 
 
-class OllamaDesligado:
-    def __init__(self, host):
-        pass
-
-    def list(self):
-        raise ConnectionError("recusado")
-
-
 def test_verificar_ollama_aceita_modelo_sem_tag(cfg, monkeypatch):
-    monkeypatch.setattr(cli.ollama, "Client", ollama_com("bge-m3:latest", "qwen2.5:7b"))
-    cli.verificar_ollama(cfg, "bge-m3", "qwen2.5:7b")
+    monkeypatch.setattr(modelos.ollama, "Client", ollama_com("bge-m3:latest", "qwen2.5:7b"))
+    modelos.verificar_ollama(cfg, "bge-m3", "qwen2.5:7b")
 
 
 def test_verificar_ollama_explica_como_instalar_modelo(cfg, monkeypatch):
-    monkeypatch.setattr(cli.ollama, "Client", ollama_com("bge-m3:latest"))
+    monkeypatch.setattr(modelos.ollama, "Client", ollama_com("bge-m3:latest"))
     with pytest.raises(ErroAskDocs, match="ollama pull llama3.2"):
-        cli.verificar_ollama(cfg, "bge-m3", "llama3.2")
+        modelos.verificar_ollama(cfg, "bge-m3", "llama3.2")
 
 
 def test_verificar_ollama_desligado(cfg, monkeypatch):
-    monkeypatch.setattr(cli.ollama, "Client", OllamaDesligado)
-    with pytest.raises(ErroAskDocs, match="Ollama nao respondeu"):
-        cli.verificar_ollama(cfg, "bge-m3")
+    monkeypatch.setattr(modelos.ollama, "Client", ollama_com(erro=ConnectionError("recusado")))
+    with pytest.raises(ErroAskDocs, match="não respondeu"):
+        modelos.verificar_ollama(cfg, "bge-m3")
+
+
+@pytest.fixture
+def langsmith_ligado(monkeypatch):
+    # O langsmith guarda as variáveis em cache: limpar antes e depois evita
+    # que o teste passe por acaso ou vaze para os outros.
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    get_env_var.cache_clear()
+    yield
+    monkeypatch.undo()
+    get_env_var.cache_clear()
+
+
+def test_execucao_local_desliga_langsmith_mesmo_com_a_variavel_ligada(cfg, langsmith_ligado):
+    assert _tracing_v2_is_enabled()
+    with modelos.execucao_local(cfg):
+        assert not _tracing_v2_is_enabled()
+
+
+def test_execucao_local_avisa_quando_o_ollama_e_remoto(cfg, caplog):
+    with modelos.execucao_local(cfg.model_copy(update={"ollama_url": "http://10.0.0.5:11434"})):
+        pass
+    assert "sair desta máquina" in caplog.text
+
+
+def test_execucao_local_sem_aviso_com_ollama_local(cfg, caplog):
+    with modelos.execucao_local(cfg):
+        pass
+    assert caplog.text == ""
 
 
 class LlmFalso:
-    def __init__(self):
+    def __init__(self, *partes):
+        self.partes = partes or ("R$ 380,00 ", "por noite.")
         self.chamadas = 0
 
     def stream(self, mensagens):
         self.chamadas += 1
-        yield SimpleNamespace(content="R$ 380,00 ")
-        yield SimpleNamespace(content="por noite.")
+        yield from (SimpleNamespace(content=p) for p in self.partes)
 
 
 def banco_com(*resultados):
@@ -60,7 +85,7 @@ def banco_com(*resultados):
 
 def test_sem_trecho_relevante_nao_chama_o_modelo(cfg, capsys):
     llm = LlmFalso()
-    cli.responder("capital da Franca?", banco_com((doc("x"), 0.1)), llm, cfg)
+    cli.responder("capital da França?", banco_com((doc("x"), 0.1)), llm, cfg)
 
     assert llm.chamadas == 0
     assert capsys.readouterr().out.strip() == SEM_RESPOSTA
@@ -81,35 +106,13 @@ def test_responde_e_agrupa_fontes_por_arquivo(cfg, capsys):
     assert "anexo.pdf (p. 1)" in saida
 
 
-def test_resposta_e_fonte_nao_levam_sequencias_de_escape_ao_terminal(cfg, capsys):
-    class LlmMalicioso:
-        def stream(self, mensagens):
-            yield SimpleNamespace(content="\x1b]0;titulo falso\x07\x1b[2JLimpo\n")
-
-    banco = banco_com((doc("x", "\x1b[31mvermelho.pdf"), 0.9))
-    cli.responder("?", banco, LlmMalicioso(), cfg)
+def test_resposta_do_modelo_nao_leva_escapes_ao_terminal(cfg, capsys):
+    llm = LlmFalso("\x1b]0;titulo falso\x07", "\x1b[2JLimpo")
+    cli.responder("?", banco_com((doc("x"), 0.9)), llm, cfg)
 
     saida = capsys.readouterr().out
     assert "\x1b" not in saida and "\x07" not in saida
-    assert "Limpo\n" in saida
-
-
-@pytest.mark.parametrize("variavel", ["LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"])
-def test_desliga_rastreamento_do_langsmith(cfg, monkeypatch, caplog, variavel):
-    monkeypatch.setenv(variavel, "true")
-    cli.garantir_execucao_local(cfg)
-    assert cli.os.environ[variavel] == "false"
-    assert "LangSmith" in caplog.text
-
-
-def test_avisa_quando_o_ollama_e_remoto(cfg, caplog):
-    cli.garantir_execucao_local(cfg.model_copy(update={"ollama_url": "http://10.0.0.5:11434"}))
-    assert "vao sair desta maquina" in caplog.text
-
-
-def test_ollama_local_nao_gera_aviso(cfg, caplog):
-    cli.garantir_execucao_local(cfg)
-    assert caplog.text == ""
+    assert "Limpo" in saida
 
 
 def test_main_mostra_erro_amigavel_sem_traceback(monkeypatch, capsys):
