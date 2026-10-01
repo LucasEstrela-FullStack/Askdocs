@@ -21,7 +21,7 @@ MODELO = ChatPromptTemplate.from_messages([
 
 
 def formatar_contexto(documentos: list[Document]) -> str:
-    """Numera cada trecho e indica de qual arquivo e pagina ele veio."""
+    """Numera cada trecho e diz de qual arquivo e página ele veio."""
     blocos = [
         f"[{i}] {doc.metadata['fonte']}, página {doc.metadata['pagina']}\n{doc.page_content}"
         for i, doc in enumerate(documentos, start=1)

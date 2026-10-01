@@ -1,3 +1,3 @@
-"""AskDocs: perguntas e respostas sobre seus PDFs com RAG 100% local."""
+"""AskDocs: perguntas e respostas sobre os seus PDFs com RAG, sem sair da máquina."""
 
 __version__ = "0.1.0"

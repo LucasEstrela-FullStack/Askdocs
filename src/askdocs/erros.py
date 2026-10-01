@@ -1,5 +1,5 @@
-"""Erros esperados do AskDocs, mostrados ao usuario sem traceback."""
+"""Erros que o AskDocs mostra ao usuário sem traceback."""
 
 
 class ErroAskDocs(Exception):
-    """Falha que o usuario consegue corrigir (pasta vazia, Ollama parado...)."""
+    """Problema que o próprio usuário resolve, como pasta vazia ou Ollama fechado."""

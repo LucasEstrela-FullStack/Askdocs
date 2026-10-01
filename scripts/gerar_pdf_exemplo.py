@@ -2,11 +2,11 @@
 # requires-python = ">=3.12"
 # dependencies = ["reportlab>=4.2"]
 # ///
-"""Gera o PDF de exemplo da base de conhecimento do AskDocs.
+"""Gera o PDF de exemplo para a base do AskDocs.
 
-O documento e um manual do colaborador de uma empresa ficticia, cheio de
-numeros, prazos e regras especificas: o modelo nao tem como conhece-los
-de antemao, entao uma resposta certa prova que veio da base vetorizada.
+É o manual do colaborador de uma empresa inventada, com números, prazos e
+regras bem específicos. O modelo não tem como saber nada disso de antemão,
+então, quando ele acerta, a resposta veio mesmo da base.
 
 Uso:
     uv run scripts/gerar_pdf_exemplo.py [caminho_de_saida]
