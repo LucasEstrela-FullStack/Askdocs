@@ -19,6 +19,8 @@ class Config(BaseSettings):
     colecao: str = "askdocs"
 
     ollama_url: str = "http://localhost:11434"
+    # Camadas do modelo enviadas a GPU; None deixa o Ollama decidir e 0 forca CPU.
+    ollama_num_gpu: int | None = Field(None, ge=0)
     modelo_embedding: str = "bge-m3"
     modelo_chat: str = "llama3.2"
     temperatura: float = Field(0.1, ge=0, le=2)
