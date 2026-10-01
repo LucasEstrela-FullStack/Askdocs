@@ -41,11 +41,11 @@ def test_sem_controle_remove_escapes_e_mantem_quebras():
 
 
 def test_sem_controle_remove_invisiveis_e_marcas_de_direcao():
-    # "relatório‮fdp.exe" aparece na tela como "relatórioexe.pdf"
-    assert sem_controle("relatório‮fdp.exe") == "relatóriofdp.exe"
-    assert sem_controle("infor­mação​ com﻿ BOM") == "informação com BOM"
+    # "relatório\u202efdp.exe" aparece na tela como "relatórioexe.pdf"
+    assert sem_controle("relatório\u202efdp.exe") == "relatóriofdp.exe"
+    assert sem_controle("infor\u00admação\u200b com\ufeff BOM") == "informação com BOM"
 
 
 def test_sem_controle_preserva_acentos_e_emoji():
-    texto = "Férias, ação, São Paulo — 👨‍👩‍👧 ✓"
+    texto = "Férias, ação, São Paulo — 👨\u200d👩\u200d👧 ✓"
     assert sem_controle(texto) == texto

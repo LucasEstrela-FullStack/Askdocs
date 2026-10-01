@@ -6,9 +6,10 @@ import re
 # invisíveis: hífen opcional, espaços de largura zero, BOM e marcas de direção
 # (bidi). Com eles, um PDF consegue mexer no terminal, disfarçar um nome de
 # arquivo nas fontes ou quebrar uma palavra ao meio sem que ninguém veja.
+# Ficam como escapes de propósito: escritos literalmente, sumiriam da tela.
 _INVISIVEIS = re.compile(
-    "[\x00-\x08\x0b-\x1f\x7f-\x9f"
-    "­​‌‎‏‪-‮⁠-⁤⁦-⁩﻿]"
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f"
+    r"\u00ad\u200b\u200c\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
 )
 
 
