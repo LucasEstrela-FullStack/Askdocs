@@ -32,6 +32,10 @@ flowchart LR
     end
 ```
 
+Na leitura, cabeçalho e rodapé que se repetem nas páginas e o pontilhado do
+sumário são descartados: não dizem nada sobre o conteúdo e só deixariam os
+trechos parecidos entre si. PDF com senha ou corrompido é pulado com um aviso.
+
 Na indexação, cada página vira trechos (chunks) de até 1000 caracteres. Um
 trecho repete o fim do anterior, para que uma regra cortada ao meio apareça
 inteira em pelo menos um deles. Cada trecho vira um vetor e vai para o Chroma.
@@ -131,8 +135,9 @@ também fica desligada. Se `ASKDOCS_OLLAMA_URL` apontar para outra máquina, ele
 avisa: nesse caso as perguntas e os trechos dos PDFs saem do seu computador.
 
 O texto dos PDFs é tratado como dado, não como instrução. Caracteres de
-controle são removidos na leitura e na resposta, para que um PDF não consiga
-mexer no seu terminal.
+controle e invisíveis (inclusive as marcas que invertem a direção do texto) são
+removidos na leitura e na resposta, para que um PDF não consiga mexer no seu
+terminal nem disfarçar o nome de um arquivo nas fontes.
 
 ## Testes
 
